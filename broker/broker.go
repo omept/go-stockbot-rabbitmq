@@ -6,15 +6,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/ong-gtp/go-stockbot/api"
 	"github.com/ong-gtp/go-stockbot/utils"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type StockRequest struct {
-	RoomId uint   `json:"RoomId"`
-	Code   string `json:"Code"`
+	ChatRoomName string `json:"chatRoomName"`
+	ChatRoomId   uint   `json:"chatRoomId"`
+	ChatMessage  string `json:"chatMessage"`
 }
 
 type StockReponse struct {
@@ -100,9 +103,10 @@ func (b *Broker) ReadMessages() {
 func messageTransformer(entries <-chan amqp.Delivery, receivedMessages chan StockRequest) {
 	var sr StockRequest
 	for d := range entries {
-		err := utils.ParseBody(d.Body, &sr)
+		log.Println("d.Body", string(d.Body))
+		err := json.Unmarshal([]byte(d.Body), &sr)
 		if err != nil {
-			log.Printf("Received bad request : %s ", string(d.Body))
+			log.Printf("Error on received request : %s ", err)
 			continue
 		}
 		log.Println("Received a request")
@@ -113,12 +117,20 @@ func messageTransformer(entries <-chan amqp.Delivery, receivedMessages chan Stoc
 func processRequest(s <-chan StockRequest, b *Broker) {
 
 	for r := range s {
-		log.Println("processing stock request for ", r.Code)
+		log.Println("processing stock request for ", r.ChatRoomId)
+		cM := r.ChatMessage
+		cM = strings.Replace(cM, "/stock=", "", 1)
 		sr := StockReponse{
-			RoomId:  r.RoomId,
-			Message: fmt.Sprintf("Sample message sent to roomId %d ", r.RoomId),
+			RoomId:  r.ChatRoomId,
+			Message: fmt.Sprintf("Processing: %s", cM),
 		}
 		go b.PublishMessage(sr)
-		log.Println("processed", r.Code)
+		msg := api.EvalStock(cM)
+		sr2 := StockReponse{
+			RoomId:  r.ChatRoomId,
+			Message: msg,
+		}
+		go b.PublishMessage(sr2)
+		log.Println("processed", r.ChatMessage)
 	}
 }
